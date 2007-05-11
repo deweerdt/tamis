@@ -19,8 +19,7 @@ static int insn_len(uint8_t *opcode)
 		case 0x8b:
 			return 1;
 		default:
-			printf("unknown insn %02x\n", opcode[0]);
-			exit(0);
+			return -1;
 	}
 }
 static void dump_mem(void *mem, size_t len, size_t size)
@@ -49,10 +48,10 @@ int tamis_protect(void *mem, size_t len)
 	return mprotect(p, len, PROT_NONE);
 }
 
-int tamis_unprotect(void *mem, size_t len)
+int tamis_unprotect(struct tamis_memzone *mz)
 {
-	void *p = mem - ((unsigned long)mem % PAGE_SIZE);
-	return mprotect(p, len, PROT_READ | PROT_WRITE);
+	void *p = mz->mem - ((unsigned long)mz->mem % PAGE_SIZE);
+	return mprotect(p, mz->len, PROT_READ | PROT_WRITE);
 }
 
 static void exepage_protect(void *mem)
@@ -75,6 +74,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
 
 	exepage_unprotect(eip);
+	//printf("restoring %p\n", eip);
 	eip[0] = tamis_private.old_opcode;	
 	exepage_protect(eip);
 
@@ -87,6 +87,10 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 static struct tamis_memzone _mz[512];
 static int imz = 0;
 
+static void del_memzone(struct tamis_memzone *mz)
+{
+	memset(mz, 0, sizeof(*mz));
+}
 static void add_memzone(void *p, size_t len)
 {
 	_mz[imz].mem = p;
@@ -109,33 +113,58 @@ static inline struct tamis_memzone *find_memzone(void *p)
 }
 static void signal_segv(int signum, siginfo_t * info, void* stack)
 {
-    void **ebp = 0;
-    void *eip = 0;
-    void *next_insn = 0;
-    struct tamis_memzone *mz;
-    ucontext_t *ucontext = (ucontext_t *)stack;
+	void **ebp = 0;
+	void *eip = 0;
+	void *next_insn = 0;
+	struct tamis_memzone *mz;
+	int len;
+	ucontext_t *ucontext = (ucontext_t *)stack;
 
-    eip = (void *)ucontext->uc_mcontext.gregs[REG_EIP];
-    next_insn = eip + insn_len(eip);
 
-    exepage_unprotect(next_insn);
-    tamis_private.old_opcode = ((uint8_t *)next_insn)[0];
-    ((uint8_t *)next_insn)[0] = BREAK_INSN;
-    exepage_protect(next_insn);
+	mz = find_memzone(info->si_addr);
 
-    ebp = (void**)ucontext->uc_mcontext.gregs[REG_EBP];
+	if (mz) {
+		eip = (void *)ucontext->uc_mcontext.gregs[REG_EIP];
+		len = insn_len(eip);
+		if (len < 0) {
+			printf("Unknown opcode %02x at %p\n", ((uint8_t*)eip)[0], eip);
+			exit(0);
+		}
+		next_insn = eip + len;
 
-    mz = find_memzone(info->si_addr);
+		exepage_unprotect(next_insn);
+		tamis_private.old_opcode = ((uint8_t *)next_insn)[0];
+		//printf("setting %p\n", next_insn);
+		((uint8_t *)next_insn)[0] = BREAK_INSN;
+		exepage_protect(next_insn);
 
-    if (mz && mz_includes(info->si_addr, mz)) {
-	    tamis_private.to_protect_mem = mz->mem;
-	    tamis_private.to_protect_len = mz->len;
-	    tamis_unprotect(info->si_addr, SIZE);
-    }
-    return;
+		ebp = (void**)ucontext->uc_mcontext.gregs[REG_EBP];
+		tamis_private.to_protect_mem = mz->mem;
+		tamis_private.to_protect_len = mz->len;
+		tamis_unprotect(mz);
+
+		if (mz_includes(info->si_addr, mz)) {
+			/* */
+		}
+	} else {
+		printf("not our sigsegv at %p\n", info->si_addr);
+		while(1);
+		exit(0);
+	}
+	return;
 }
 
-void tamis_shared(void *p, size_t len)
+void tamis_unshare(void *p)
+{
+	struct tamis_memzone *mz;
+	mz = find_memzone(p);
+	if (!mz)
+		return;
+	tamis_unprotect(mz);
+	del_memzone(mz);
+}
+
+void tamis_share(void *p, size_t len)
 {
 	add_memzone(p, len);
 	tamis_protect(p, len);
@@ -161,10 +190,12 @@ int tamis_init()
 	return 0;
 }
 
+#define SIZE (sizeof(int)*126)
 int main()
 {
 	int *ptr;
 	int *ptr2;
+	int *ptr3;
 	int i, loops=10000;
 	struct timeval tv1, tv2;
 
@@ -174,27 +205,30 @@ int main()
 	}
 
 	ptr = malloc(SIZE);
-	malloc(4096);
+	ptr3 = malloc(4096);
 	ptr2 = malloc(SIZE);
 
-	tamis_shared(ptr, SIZE);
+	tamis_share(ptr, SIZE);
 
 	gettimeofday(&tv1);
 	for (i=0; i < loops; i++) {
-		ptr[0] = 2;
+		ptr[i%(SIZE/sizeof(ptr[0]))] = 2;
 	}
 	gettimeofday(&tv2);
 	printf("len: %d %d\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
 
+	tamis_unshare(ptr);
+
 	gettimeofday(&tv1);
 	for (i=0; i < loops; i++) {
-		ptr2[0] = 2;
+		ptr2[i%(SIZE/sizeof(ptr[0]))] = 2;
 	}
 	gettimeofday(&tv2);
 	printf("len: %d %d\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
 
 	free(ptr);
 	free(ptr2);
+	free(ptr3);
 	puts("OK");
 	return 1;
 }

@@ -15,6 +15,5 @@ struct tamis_memzone {
 #define BREAK_INSN 0xcc
 
 #define PAGE_SIZE 4096
-#define SIZE (sizeof(int)*126)
 
 #endif /* __TAMIS_H__ */
