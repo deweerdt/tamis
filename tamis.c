@@ -144,7 +144,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 
 	exepage_unprotect(eip);
 	pr_debug("restoring %p\n", eip);
-	eip[0] = tamis_private.old_opcode;	
+	eip[0] = tamis_private.old_opcode;
 	exepage_protect(eip);
 
 	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
@@ -157,7 +157,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 	return;
 }
 
-/* 
+/*
  * TODO: the whole memzone handling sucks,
  * use something dynamic
  */
@@ -208,7 +208,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 
 	/*dump_mem(stack, 256, 4);*/
 	if (mz) {
-		
+
 		len = insn_len(eip);
 		if (len < 0) {
 			fprintf(stderr, "Unknown opcode %02x at %p\n", ((uint8_t*)eip)[0], eip);
@@ -337,7 +337,7 @@ void *timing(void *arg)
 	int *ptr3;
 	int i, loops=10000;
 	struct timeval tv1, tv2;
-	
+
 #define SIZE (sizeof(int)*126)
 	ptr = malloc(SIZE);
 	ptr3 = malloc(4096);
