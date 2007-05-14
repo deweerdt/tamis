@@ -32,7 +32,7 @@
 
 #include "tamis.h"
 
-#if 1
+#if 0
 #define pr_debug(x, a...) do { \
 			 	char __buf[4096]; \
 				sprintf(__buf, x, ##a); \
@@ -113,7 +113,7 @@ static void __attribute__((unused)) dump_mem(void *mem, size_t len, size_t size)
 static int protect(void *mem, size_t len)
 {
 	void *p = mem - ((unsigned long)mem % PAGE_SIZE);
-	return mprotect(p, len, PROT_WRITE);
+	return mprotect(p, len, PROT_NONE);
 }
 
 static int unprotect(struct tamis_memzone *mz)
@@ -143,6 +143,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 
 	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
 
+	pr_debug("sigsegv illegal access %p, eip %p\n", info->si_addr, eip);
 	exepage_unprotect(eip);
 	pr_debug("restoring %p\n", eip);
 	eip[0] = tamis_private.old_opcode;
@@ -215,8 +216,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 			fprintf(stderr, "Unknown opcode %02x at %p\n", ((uint8_t*)eip)[0], eip);
 			exit(0);
 		}
-		/* TODO -1 or not ??? */
-		next_insn = eip + len - 1;
+		next_insn = eip + len;
 
 		exepage_unprotect(next_insn);
 		tamis_private.old_opcode = ((uint8_t *)next_insn)[0];
@@ -230,7 +230,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		unprotect(mz);
 
 		if (mz_includes(info->si_addr, mz)) {
-			assert(0);
+			/*assert(0);*/
 			/* even number of lockings == NOK */
 			if ((tamis_private.lock_level & 1) ^ 1) {
 				fprintf(stderr, "suspicious access from %p\n", eip);
@@ -349,11 +349,9 @@ void *timing(void *arg)
 
 	gettimeofday(&tv1, NULL);
 	for (i=0; i < loops; i++) {
-		//ptr[i%(SIZE/sizeof(ptr[0]))] = 2;
-		ptr[0] = 2;
+		ptr[i%(SIZE/sizeof(ptr[0]))] = 2;
 	}
 	gettimeofday(&tv2, NULL);
-	gettimeofday(&tv1, NULL);
 	printf("with protection:: %lds %ldus\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
 
 	tamis_unprotect(ptr);
@@ -369,14 +367,15 @@ void *timing(void *arg)
 	free(ptr2);
 	free(ptr3);
 	puts("OK");
+
+	return NULL;
 }
 
 int main()
 {
-	pthread_t t;
 	tamis_init();
-	pthread_create(&t, NULL, timing, NULL);
-	pthread_join(t, NULL);
-	//thread_test();
+
+	timing(NULL);
+	thread_test();
 	return 0;
 }
