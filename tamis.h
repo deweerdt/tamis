@@ -20,6 +20,9 @@
 #ifndef __TAMIS_H__
 #define __TAMIS_H__
 
+#define __tamis_priv __attribute__((section ("tamis.2")))
+#define __tamis __attribute__((section ("tamis.1")))
+
 struct tamis_tls {
 	uint8_t old_opcode;
 	void *to_protect_mem;
@@ -41,7 +44,7 @@ struct tamis_memzone {
  *
  * @param p The pointer to the memory to unprotect 
  **/
-void tamis_unshare(void *p);
+void tamis_unprotect(void *p);
 
 /**
  * @brief Protect memory accesses to a give memory zone with tamis
@@ -52,7 +55,7 @@ void tamis_unshare(void *p);
  * @return 0 in case of success, -1 otherwise. errno is set with the
  * approriate value
  **/
-int tamis_share(void *p, size_t len);
+int tamis_protect(void *p, size_t len);
 
 /**
  * @brief Initialize the tamis library

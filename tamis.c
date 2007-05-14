@@ -43,7 +43,14 @@
 #endif
 
 static __thread struct tamis_tls tamis_private;
+/* Serializes the accesses to the SIGSEGV/SIGTRAP code */
+static pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct tamis_memzone _mz[512];
+static int imz = 0;
+static __tamis_priv char tamis_cushion[4096];
 
+
+#if 0
 static int (*orig_pthread_mutex_lock)(pthread_mutex_t *mutex);
 static int (*orig_pthread_mutex_unlock)(pthread_mutex_t *mutex);
 
@@ -57,6 +64,7 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 	tamis_private.lock_level--;
 	return orig_pthread_mutex_unlock(mutex);
 }
+#endif
 
 static int insn_len(uint8_t *opcode)
 {
@@ -110,6 +118,9 @@ static void __attribute__((unused)) dump_mem(void *mem, size_t len, size_t size)
 	return;
 }
 
+/*
+ * mprotect wrappers for common tasks
+ */
 static int protect(void *mem, size_t len)
 {
 	void *p = mem - ((unsigned long)mem % PAGE_SIZE);
@@ -133,8 +144,6 @@ static void exepage_unprotect(void *mem)
 	void *p = mem - ((unsigned long)mem % PAGE_SIZE);
 	mprotect(p, PAGE_SIZE, PROT_READ|PROT_WRITE);
 }
-
-static pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void signal_trap(int signum, siginfo_t * info, void* stack)
 {
@@ -163,9 +172,6 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
  * TODO: the whole memzone handling sucks,
  * use something dynamic
  */
-static struct tamis_memzone _mz[512];
-static int imz = 0;
-
 static void del_memzone(struct tamis_memzone *mz)
 {
 	memset(mz, 0, sizeof(*mz));
@@ -233,7 +239,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 			/*assert(0);*/
 			/* even number of lockings == NOK */
 			if ((tamis_private.lock_level & 1) ^ 1) {
-				fprintf(stderr, "suspicious access from %p\n", eip);
+				//fprintf(stderr, "suspicious access from %p\n", eip);
 			}
 		}
 	} else {
@@ -267,7 +273,7 @@ int tamis_protect(void *p, size_t len)
 int tamis_init()
 {
 	struct sigaction action;
-	void *lib_handle = NULL;
+	void *__attribute__((unused)) lib_handle = NULL;
 
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = signal_segv;
@@ -283,6 +289,7 @@ int tamis_init()
 		return -1;
 	}
 
+	/*
 	if ( (lib_handle = dlopen("libpthread.so", RTLD_NOW)) == NULL) {
 		if ( (lib_handle = dlopen("libpthread.so.0", RTLD_NOW)) == NULL) {
 			fprintf(stderr, "error loading libpthread!\n");
@@ -292,90 +299,9 @@ int tamis_init()
 
 	HIJACK(lib_handle, pthread_mutex_lock, "pthread_mutex_lock");
 	HIJACK(lib_handle, pthread_mutex_unlock, "pthread_mutex_unlock");
+	*/
 
 	return 0;
 }
 
 
-#define LOOPS 50
-static int my_shared_var;
-static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
-
-void *f_protected(void *arg)
-{
-	int i;
-	for (i=0; i < LOOPS; i++) {
-		pthread_mutex_lock(&m);
-		my_shared_var = i;
-		pthread_mutex_unlock(&m);
-	}
-	return NULL;
-}
-void *f_unprotected(void *arg)
-{
-	int i;
-	for (i=0; i < LOOPS; i++) {
-		my_shared_var = i;
-	}
-	return NULL;
-}
-
-void thread_test()
-{
-	pthread_t t1;
-	pthread_t t2;
-
-	tamis_protect(&my_shared_var, sizeof(my_shared_var));
-	pthread_create(&t1, NULL, f_protected, NULL);
-	pthread_create(&t2, NULL, f_unprotected, NULL);
-	pthread_join(t1, NULL);
-	pthread_join(t2, NULL);
-}
-
-void *timing(void *arg)
-{
-	int *ptr;
-	int *ptr2;
-	int *ptr3;
-	int i, loops=10000;
-	struct timeval tv1, tv2;
-
-#define SIZE (sizeof(int)*126)
-	ptr = malloc(SIZE);
-	ptr3 = malloc(4096);
-	ptr2 = malloc(SIZE);
-
-	tamis_protect(ptr, SIZE);
-
-	gettimeofday(&tv1, NULL);
-	for (i=0; i < loops; i++) {
-		ptr[i%(SIZE/sizeof(ptr[0]))] = 2;
-	}
-	gettimeofday(&tv2, NULL);
-	printf("with protection:: %lds %ldus\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
-
-	tamis_unprotect(ptr);
-
-	gettimeofday(&tv1, NULL);
-	for (i=0; i < loops; i++) {
-		ptr2[i%(SIZE/sizeof(ptr[0]))] = 2;
-	}
-	gettimeofday(&tv2, NULL);
-	printf("without protection: %lds %ldus\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
-
-	free(ptr);
-	free(ptr2);
-	free(ptr3);
-	puts("OK");
-
-	return NULL;
-}
-
-int main()
-{
-	tamis_init();
-
-	timing(NULL);
-	thread_test();
-	return 0;
-}

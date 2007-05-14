@@ -1,11 +1,11 @@
 SET(LIB_NAME tamis)
 
-ADD_EXECUTABLE(${LIB_NAME} tamis.c)
+ADD_LIBRARY(${LIB_NAME} SHARED tamis.c)
 ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall)
 #SET_TARGET_PROPERTIES(${LIB_NAME} PROPERTIES LINK_FLAGS "-nostartfiles")
 
-TARGET_LINK_LIBRARIES(${LIB_NAME} pthread dl)
+TARGET_LINK_LIBRARIES(${LIB_NAME})
 
-#ADD_EXECUTABLE(tamis_test tamis_test.c tamis.c)
-#TARGET_LINK_LIBRARIES(tamis_test pthread dl)
-#TARGET_LINK_LIBRARIES(tamis_test ${LIB_NAME})
+ADD_EXECUTABLE(tamis_test tamis_test.c tamis.c)
+TARGET_LINK_LIBRARIES(tamis_test pthread dl)
+TARGET_LINK_LIBRARIES(tamis_test ${LIB_NAME})
