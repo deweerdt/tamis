@@ -28,6 +28,7 @@
 #include <dlfcn.h>
 #include <pthread.h>
 #include <sys/time.h>
+#include <assert.h>
 
 #include "tamis.h"
 
@@ -63,7 +64,7 @@ static int insn_len(uint8_t *opcode)
 		case 0xa3:
 			return 5;
 		case 0xc7:
-			return 7;
+			return 6;
 		case 0x8b:
 			return 2;
 		default:
@@ -109,13 +110,13 @@ static void __attribute__((unused)) dump_mem(void *mem, size_t len, size_t size)
 	return;
 }
 
-int tamis_protect(void *mem, size_t len)
+static int protect(void *mem, size_t len)
 {
 	void *p = mem - ((unsigned long)mem % PAGE_SIZE);
-	return mprotect(p, len, PROT_NONE);
+	return mprotect(p, len, PROT_WRITE);
 }
 
-int tamis_unprotect(struct tamis_memzone *mz)
+static int unprotect(struct tamis_memzone *mz)
 {
 	void *p = mz->mem - ((unsigned long)mz->mem % PAGE_SIZE);
 	return mprotect(p, mz->len, PROT_READ | PROT_WRITE);
@@ -148,7 +149,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 	exepage_protect(eip);
 
 	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
-	tamis_protect(tamis_private.to_protect_mem,
+	protect(tamis_private.to_protect_mem,
 		      tamis_private.to_protect_len);
 
 	/* locked in signal_segv */
@@ -226,9 +227,10 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		ebp = (void**)ucontext->uc_mcontext.gregs[REG_EBP];
 		tamis_private.to_protect_mem = mz->mem;
 		tamis_private.to_protect_len = mz->len;
-		tamis_unprotect(mz);
+		unprotect(mz);
 
 		if (mz_includes(info->si_addr, mz)) {
+			assert(0);
 			/* even number of lockings == NOK */
 			if ((tamis_private.lock_level & 1) ^ 1) {
 				fprintf(stderr, "suspicious access from %p\n", eip);
@@ -242,20 +244,20 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 	return;
 }
 
-void tamis_unshare(void *p)
+void tamis_unprotect(void *p)
 {
 	struct tamis_memzone *mz;
 	mz = find_memzone(p);
 	if (!mz)
 		return;
-	tamis_unprotect(mz);
+	unprotect(mz);
 	del_memzone(mz);
 }
 
-int tamis_share(void *p, size_t len)
+int tamis_protect(void *p, size_t len)
 {
 	add_memzone(p, len);
-	return tamis_protect(p, len);
+	return protect(p, len);
 }
 
 #define HIJACK(a, x, y) if (!(orig_##x = dlsym(a , y))) {\
@@ -323,7 +325,7 @@ void thread_test()
 	pthread_t t1;
 	pthread_t t2;
 
-	tamis_share(&my_shared_var, sizeof(my_shared_var));
+	tamis_protect(&my_shared_var, sizeof(my_shared_var));
 	pthread_create(&t1, NULL, f_protected, NULL);
 	pthread_create(&t2, NULL, f_unprotected, NULL);
 	pthread_join(t1, NULL);
@@ -343,7 +345,7 @@ void *timing(void *arg)
 	ptr3 = malloc(4096);
 	ptr2 = malloc(SIZE);
 
-	tamis_share(ptr, SIZE);
+	tamis_protect(ptr, SIZE);
 
 	gettimeofday(&tv1, NULL);
 	for (i=0; i < loops; i++) {
@@ -354,7 +356,7 @@ void *timing(void *arg)
 	gettimeofday(&tv1, NULL);
 	printf("with protection:: %lds %ldus\n", tv2.tv_sec - tv1.tv_sec, tv2.tv_usec - tv1.tv_usec);
 
-	tamis_unshare(ptr);
+	tamis_unprotect(ptr);
 
 	gettimeofday(&tv1, NULL);
 	for (i=0; i < loops; i++) {
