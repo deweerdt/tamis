@@ -47,7 +47,9 @@ static __thread struct tamis_tls tamis_private;
 static pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct tamis_memzone _mz[512];
 static int imz = 0;
-static __tamis_priv char tamis_cushion[4096];
+/* this should be at the end of the static zone to protect libc's variables
+ * to be mprotected */
+static __tamis char tamis_cushion[4096];
 
 
 #if 0
@@ -66,12 +68,15 @@ int pthread_mutex_unlock(pthread_mutex_t *mutex)
 }
 #endif
 
+/* returns the length of the opcode, opcode[0] included */
 static int insn_len(uint8_t *opcode)
 {
 	switch (opcode[0]) {
+		case 0xa1:
+			return 5;
 		case 0xa3:
 			return 5;
-		case 0xc7:
+		case 0xc7: /* 2 args */
 			return 6;
 		case 0x8b:
 			return 2;

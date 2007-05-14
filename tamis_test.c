@@ -2,11 +2,12 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 
 #include "tamis.h"
 
-#define LOOPS 50
+#define LOOPS 50000
 static __tamis int my_shared_var;
 static pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
@@ -16,8 +17,10 @@ void *f_protected(void *arg)
 	for (i=0; i < LOOPS; i++) {
 		pthread_mutex_lock(&m);
 		my_shared_var = i;
+		memcpy(&my_shared_var, &i, sizeof(i));;
 		pthread_mutex_unlock(&m);
 	}
+	printf("my_shared_var = %d\n", my_shared_var);
 	return NULL;
 }
 void *f_unprotected(void *arg)
@@ -85,6 +88,6 @@ int main()
 	tamis_init();
 
 	thread_test();
-	//timing(NULL);
+	timing(NULL);
 	return 0;
 }

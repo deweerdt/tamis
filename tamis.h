@@ -20,9 +20,6 @@
 #ifndef __TAMIS_H__
 #define __TAMIS_H__
 
-#define __tamis_priv __attribute__((section ("tamis.2")))
-#define __tamis __attribute__((section ("tamis.1")))
-
 struct tamis_tls {
 	uint8_t old_opcode;
 	void *to_protect_mem;
@@ -38,6 +35,8 @@ struct tamis_memzone {
 #define BREAK_INSN 0xcc
 
 #define PAGE_SIZE 4096
+
+#define __tamis __attribute__ ((aligned (PAGE_SIZE))) __attribute__((section ("tamis")))
 
 /**
  * @brief Remove a memory zone from being protected by tamis
