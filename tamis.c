@@ -36,37 +36,36 @@
 #define pr_debug(x, a...) do { \
 			 	char __buf[4096]; \
 				sprintf(__buf, x, ##a); \
-				fprintf(stderr, "0x%x	%s", (int)pthread_self(), __buf); \
+				fprintf(stderr, "tid:0x%x\t%s", (int)pthread_self(), __buf); \
 			  } while(0);
 #else
 #define pr_debug(...) do {} while(0)
 #endif
 
-static __thread struct tamis_tls tamis_private;
+static __thread struct tamis_private tamis_priv;
 /* Serializes the accesses to the SIGSEGV/SIGTRAP code */
 static pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
 static struct tamis_memzone _mz[512];
 static int imz = 0;
 /* this should be at the end of the static zone to protect libc's variables
  * to be mprotected */
-static __tamis char tamis_cushion[4096];
+__tamis char tamis_cushion[4096];
 
 
-#if 0
+
 static int (*orig_pthread_mutex_lock)(pthread_mutex_t *mutex);
 static int (*orig_pthread_mutex_unlock)(pthread_mutex_t *mutex);
 
 int pthread_mutex_lock(pthread_mutex_t *mutex)
 {
-	tamis_private.lock_level++;
+	tamis_priv.lock_level++;
 	return orig_pthread_mutex_lock(mutex);
 }
 int pthread_mutex_unlock(pthread_mutex_t *mutex)
 {
-	tamis_private.lock_level--;
+	tamis_priv.lock_level--;
 	return orig_pthread_mutex_unlock(mutex);
 }
-#endif
 
 /* returns the length of the opcode, opcode[0] included */
 static int insn_len(uint8_t *opcode)
@@ -80,8 +79,12 @@ static int insn_len(uint8_t *opcode)
 			return 6;
 		case 0x8b:
 			return 2;
+		case 0xa5:
+			return 1;
+		case 0xf3:
+			return 1;
 		default:
-			fprintf(stderr, "unknown opcode 0x%02x\n", opcode[0]);
+			fprintf(stderr, "Unknown opcode 0x%02x\n", opcode[0]);
 			return -1;
 	}
 }
@@ -157,18 +160,19 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 
 	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
 
-	pr_debug("sigsegv illegal access %p, eip %p\n", info->si_addr, eip);
+	pr_debug("signal_trap   : Caught a trap at eip %p\n", eip);
 	exepage_unprotect(eip);
-	pr_debug("restoring %p\n", eip);
-	eip[0] = tamis_private.old_opcode;
+	pr_debug("signal_trap   : Restoring old opcode: 0x%2x at %p\n", tamis_priv.old_opcode, eip);
+	eip[0] = tamis_priv.old_opcode;
 	exepage_protect(eip);
 
 	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
-	protect(tamis_private.to_protect_mem,
-		      tamis_private.to_protect_len);
+	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
+	protect(tamis_priv.to_protect_mem,
+		      tamis_priv.to_protect_len);
 
 	/* locked in signal_segv */
-	pthread_mutex_unlock(&tamis_lock);
+	orig_pthread_mutex_unlock(&tamis_lock);
 
 	return;
 }
@@ -213,10 +217,10 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 	ucontext_t *ucontext = stack;
 
 	/* unlocked after signal_trap */
-	pthread_mutex_lock(&tamis_lock);
+	orig_pthread_mutex_lock(&tamis_lock);
 
 	eip = (void *)ucontext->uc_mcontext.gregs[REG_EIP];
-	pr_debug("sigsegv illegal access %p, eip %p\n", info->si_addr, eip);
+	pr_debug("signal_sigsegv: Accessing %p triggered a sigsev, eip is %p\n", info->si_addr, eip);
 	mz = find_memzone(info->si_addr);
 
 	/*dump_mem(stack, 256, 4);*/
@@ -224,26 +228,26 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 
 		len = insn_len(eip);
 		if (len < 0) {
-			fprintf(stderr, "Unknown opcode %02x at %p\n", ((uint8_t*)eip)[0], eip);
+			fprintf(stderr, "Unknown opcode 0x%02x at %p\n", ((uint8_t*)eip)[0], eip);
 			exit(0);
 		}
 		next_insn = eip + len;
 
 		exepage_unprotect(next_insn);
-		tamis_private.old_opcode = ((uint8_t *)next_insn)[0];
-		pr_debug("setting %p 0x%02x\n", next_insn, ((uint8_t *)next_insn)[0]);
+		tamis_priv.old_opcode = ((uint8_t *)next_insn)[0];
+		pr_debug("signal_sigsegv: Setting BREAK at %p, opcode was 0x%02x\n", next_insn, ((uint8_t *)next_insn)[0]);
 		((uint8_t *)next_insn)[0] = BREAK_INSN;
 		exepage_protect(next_insn);
 
 		ebp = (void**)ucontext->uc_mcontext.gregs[REG_EBP];
-		tamis_private.to_protect_mem = mz->mem;
-		tamis_private.to_protect_len = mz->len;
+		tamis_priv.to_protect_mem = mz->mem;
+		tamis_priv.to_protect_len = mz->len;
 		unprotect(mz);
 
 		if (mz_includes(info->si_addr, mz)) {
 			/*assert(0);*/
 			/* even number of lockings == NOK */
-			if ((tamis_private.lock_level & 1) ^ 1) {
+			if ((tamis_priv.lock_level & 1) ^ 1) {
 				//fprintf(stderr, "suspicious access from %p\n", eip);
 			}
 		}
@@ -294,7 +298,6 @@ int tamis_init()
 		return -1;
 	}
 
-	/*
 	if ( (lib_handle = dlopen("libpthread.so", RTLD_NOW)) == NULL) {
 		if ( (lib_handle = dlopen("libpthread.so.0", RTLD_NOW)) == NULL) {
 			fprintf(stderr, "error loading libpthread!\n");
@@ -304,7 +307,6 @@ int tamis_init()
 
 	HIJACK(lib_handle, pthread_mutex_lock, "pthread_mutex_lock");
 	HIJACK(lib_handle, pthread_mutex_unlock, "pthread_mutex_unlock");
-	*/
 
 	return 0;
 }

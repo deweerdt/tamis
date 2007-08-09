@@ -20,7 +20,9 @@
 #ifndef __TAMIS_H__
 #define __TAMIS_H__
 
-struct tamis_tls {
+#include <asm/page.h>
+
+struct tamis_private {
 	uint8_t old_opcode;
 	void *to_protect_mem;
 	size_t to_protect_len;
@@ -32,23 +34,26 @@ struct tamis_memzone {
 	void *page;
 	int len;
 };
-#define BREAK_INSN 0xcc
 
-#define PAGE_SIZE 4096
+#ifdef __i386__
+#define BREAK_INSN 0xcc
+#else
+#error "Unknown arch, sorry"
+#endif
 
 #define __tamis __attribute__ ((aligned (PAGE_SIZE))) __attribute__((section ("tamis")))
 
 /**
  * @brief Remove a memory zone from being protected by tamis
  *
- * @param p The pointer to the memory to unprotect 
+ * @param p The pointer to the memory to unprotect
  **/
 void tamis_unprotect(void *p);
 
 /**
  * @brief Protect memory accesses to a give memory zone with tamis
  *
- * @param p The memory zone to protect 
+ * @param p The memory zone to protect
  * @param len The length of the memory zone to protect
  *
  * @return 0 in case of success, -1 otherwise. errno is set with the
