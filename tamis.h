@@ -70,6 +70,6 @@ int tamis_protect(void *p, size_t len);
  * @return 0 in case of success, -1 otherwise. errno is set with the
  * approriate value
  **/
-int tamis_init();
+int tamis_init(void (*tamis_action_cb)(struct tamis_private *, void *));
 
 #endif /* __TAMIS_H__ */

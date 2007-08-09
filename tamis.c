@@ -50,7 +50,7 @@ static int imz = 0;
 /* this should be at the end of the static zone to protect libc's variables
  * to be mprotected */
 __tamis char tamis_cushion[4096];
-
+static void (*tamis_action)(struct tamis_private *priv, void *eip);
 
 
 static int (*orig_pthread_mutex_lock)(pthread_mutex_t *mutex);
@@ -245,11 +245,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		unprotect(mz);
 
 		if (mz_includes(info->si_addr, mz)) {
-			/*assert(0);*/
-			/* even number of lockings == NOK */
-			if ((tamis_priv.lock_level & 1) ^ 1) {
-				//fprintf(stderr, "suspicious access from %p\n", eip);
-			}
+			tamis_action(&tamis_priv, eip);
 		}
 	} else {
 		fprintf(stderr, "not our sigsegv at %p\n", info->si_addr);
@@ -259,6 +255,17 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 	return;
 }
 
+static void tamis_default_action(struct tamis_private *priv, void *eip)
+{
+#if 0
+	/* even number of lockings == NOK */
+	if ((priv->lock_level & 1) ^ 1) {
+		fprintf(stderr, "suspicious access from %p %d\n", eip, priv->lock_level);
+	}
+#else
+	return;
+#endif
+}
 void tamis_unprotect(void *p)
 {
 	struct tamis_memzone *mz;
@@ -279,10 +286,14 @@ int tamis_protect(void *p, size_t len)
 			   fprintf(stderr, "symbol %s() not found, exiting\n", #y);\
                 	   exit(-1);\
                         }
-int tamis_init()
+int tamis_init(void (*tamis_action_cb)(struct tamis_private *, void *))
 {
 	struct sigaction action;
 	void *__attribute__((unused)) lib_handle = NULL;
+	tamis_action = tamis_default_action;
+
+	if (tamis_action_cb)
+		tamis_action = tamis_action_cb;
 
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = signal_segv;

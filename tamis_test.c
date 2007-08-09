@@ -7,7 +7,7 @@
 
 #include "tamis.h"
 
-#define LOOPS 50
+#define LOOPS 10
 
 static __tamis int my_shared_var;
 
@@ -40,6 +40,7 @@ void thread_test()
 	tamis_protect(&my_shared_var, sizeof(my_shared_var));
 	pthread_create(&t1, NULL, f_protected, NULL);
 	pthread_create(&t2, NULL, f_unprotected, NULL);
+	tamis_unprotect(&my_shared_var);
 	pthread_join(t1, NULL);
 	pthread_join(t2, NULL);
 }
@@ -96,7 +97,7 @@ redo_test:
 
 int main()
 {
-	tamis_init();
+	tamis_init(NULL);
 
 	thread_test();
 	timing(NULL);
