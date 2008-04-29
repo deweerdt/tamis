@@ -1,5 +1,5 @@
 /*
-    tamis_test.c - tamis testing code
+    test3.c - tamis testing code
     Copyright (C) 2008  Frederik Deweerdt <frederik.deweerdt@gmail.com>
 
     This program is free software; you can redistribute it and/or modify
@@ -26,8 +26,8 @@
 
 #include "tamis.h"
 
-#define LOOPS 1000
-#define THREADS 300
+#define LOOPS 10000
+#define THREADS 100
 
 static int *shared_var;
 pthread_mutex_t shared_var_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -36,6 +36,7 @@ void *access_shared_var(void *arg)
 {
 	int i;
 	for (i = 0; i < LOOPS; i++) {
+		printf("here is %d\n", (int)pthread_self());
 		*shared_var = i;
 	}
 	return NULL;
@@ -55,7 +56,6 @@ int main()
 	for (i = 0; i < THREADS; i++) {
 		pthread_create(&t[i], NULL, access_shared_var, NULL);
 	}
-	asm volatile("aze: jmp aze;\n");
 	for (i = 0; i < THREADS; i++) {
 		pthread_join(t[i], NULL);
 	}

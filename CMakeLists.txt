@@ -6,7 +6,7 @@ if(COMMAND cmake_policy)
 endif(COMMAND cmake_policy)
 
 ADD_LIBRARY(${LIB_NAME} SHARED tamis.c)
-ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall -L/opt/tsp/lib)
+ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -save-temps -g -Wall -L/opt/tsp/lib)
 SET_TARGET_PROPERTIES(${LIB_NAME} PROPERTIES LINK_FLAGS "-nostartfiles")
 
 TARGET_LINK_LIBRARIES(${LIB_NAME} pthread)
