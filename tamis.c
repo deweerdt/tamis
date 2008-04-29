@@ -1,6 +1,6 @@
 /*
     tamis.c - tamis core code
-    Copyright (C) 2007  Frederik Deweerdt <frederik.deweerdt@gmail.com>
+    Copyright (C) 2007, 2008  Frederik Deweerdt <frederik.deweerdt@gmail.com>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -17,18 +17,19 @@
     51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 */
 
-#include <memory.h>
-#include <stdlib.h>
-#include <stdio.h>
-#include <signal.h>
-#include <ucontext.h>
-#include <execinfo.h>
-#include <stdint.h>
-#include <sys/mman.h>
-#include <dlfcn.h>
-#include <pthread.h>
-#include <sys/time.h>
 #include <assert.h>
+#include <dlfcn.h>
+#include <errno.h>
+#include <execinfo.h>
+#include <memory.h>
+#include <pthread.h>
+#include <signal.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/mman.h>
+#include <sys/time.h>
+#include <ucontext.h>
 
 #include "tamis.h"
 
@@ -44,28 +45,10 @@
 
 static __thread struct tamis_private tamis_priv;
 /* Serializes the accesses to the SIGSEGV/SIGTRAP code */
-static pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
-static struct tamis_memzone _mz[512];
-static int imz = 0;
-/* this should be at the end of the static zone to protect libc's variables
- * to be mprotected */
-__tamis char tamis_cushion[4096];
-static void (*tamis_action)(struct tamis_private *priv, void *eip);
+static __tamis pthread_mutex_t tamis_lock = PTHREAD_MUTEX_INITIALIZER;
+static __tamis struct tamis_memzone _mz[512];
+static __tamis int imz = 0;
 
-
-static int (*orig_pthread_mutex_lock)(pthread_mutex_t *mutex);
-static int (*orig_pthread_mutex_unlock)(pthread_mutex_t *mutex);
-
-int pthread_mutex_lock(pthread_mutex_t *mutex)
-{
-	tamis_priv.lock_level++;
-	return orig_pthread_mutex_lock(mutex);
-}
-int pthread_mutex_unlock(pthread_mutex_t *mutex)
-{
-	tamis_priv.lock_level--;
-	return orig_pthread_mutex_unlock(mutex);
-}
 
 /* returns the length of the opcode, opcode[0] included */
 static int insn_len(uint8_t *opcode)
@@ -75,55 +58,37 @@ static int insn_len(uint8_t *opcode)
 			return 5;
 		case 0xa3:
 			return 5;
-		case 0xc7: /* 2 args */
-			return 6;
+		case 0xc7: /* takes an arg */
+			switch(opcode[1]) {
+			case 0x00:
+				return 6;
+			case 0x04:
+				return 7;
+			case 0x05:
+				return 10;
+			case 0x44:
+				return 8;
+			default:
+				fprintf(stderr, "Unknown opcode 0xc7 %d\n", opcode[1]);
+				assert(0);
+			}
 		case 0x8b:
 			return 2;
+		case 0x89:
+			switch(opcode[1]) {
+			case 0x04:
+				return 3;
+			default:
+				return 2;
+			}
 		case 0xa5:
 			return 1;
 		case 0xf3:
 			return 1;
 		default:
 			fprintf(stderr, "Unknown opcode 0x%02x\n", opcode[0]);
-			return -1;
+			assert(0);
 	}
-}
-static void __attribute__((unused)) dump_mem(void *mem, size_t len, size_t size)
-{
-	uint8_t *u8;
-#if 0
-	uint16_t *u16;
-#endif
-	uint32_t *u32;
-	int i;
-	char buf[4096] = "";
-	char buf2[4096] = "";
-
-	switch (size) {
-		case 1:
-			u8 = mem;
-			for (i=0; i <= len / size; i++) {
-				if (!(i%8))
-					pr_debug("%02x ", u8[i]);
-			}
-			break;
-		case 4:
-			u32 = mem;
-			for (i=0; i <= len / size; i++) {
-				buf2[0] = '\0';
-				sprintf(buf2, "%08x ", u32[i]);
-				strcat(buf, buf2);
-				if (!(i%8)) {
-					pr_debug("%s\n", buf);
-					buf[0] = '\0';
-				}
-			}
-			break;
-		default:
-			pr_debug("Unhandled size %d\n", size);
-	}
-	pr_debug("\n");
-	return;
 }
 
 /*
@@ -153,30 +118,6 @@ static void exepage_unprotect(void *mem)
 	mprotect(p, PAGE_SIZE, PROT_READ|PROT_WRITE);
 }
 
-static void signal_trap(int signum, siginfo_t * info, void* stack)
-{
-	int8_t *eip;
-	ucontext_t *ucontext = stack;
-
-	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
-
-	pr_debug("signal_trap   : Caught a trap at eip %p\n", eip);
-	exepage_unprotect(eip);
-	pr_debug("signal_trap   : Restoring old opcode: 0x%2x at %p\n", tamis_priv.old_opcode, eip);
-	eip[0] = tamis_priv.old_opcode;
-	exepage_protect(eip);
-
-	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
-	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
-	protect(tamis_priv.to_protect_mem,
-		      tamis_priv.to_protect_len);
-
-	/* locked in signal_segv */
-	orig_pthread_mutex_unlock(&tamis_lock);
-
-	return;
-}
-
 /*
  * TODO: the whole memzone handling sucks,
  * use something dynamic
@@ -185,18 +126,21 @@ static void del_memzone(struct tamis_memzone *mz)
 {
 	memset(mz, 0, sizeof(*mz));
 }
-static void add_memzone(void *p, size_t len)
+static struct tamis_memzone *add_memzone(void *p, size_t len)
 {
+	struct tamis_memzone *mz = &_mz[imz];
 	_mz[imz].mem = p;
 	_mz[imz].page = p - ((unsigned long)p % PAGE_SIZE);
 	_mz[imz++].len = len;
+
+	return mz;
 }
 static inline int mz_includes(void *p, struct tamis_memzone *mz)
 {
 	return p >= mz->mem && p < (mz->mem + mz->len);
 }
 
-static inline struct tamis_memzone *find_memzone(void *p)
+static struct tamis_memzone *find_memzone(void *p)
 {
 	int i;
 	for (i=0; i < imz; i++) {
@@ -207,29 +151,53 @@ static inline struct tamis_memzone *find_memzone(void *p)
 	return NULL;
 }
 
+static void priority_boost(void)
+{
+	struct sched_param p;
+	struct sched_param p_boosted = { .sched_priority = 99 };
+	tamis_priv.policy = sched_getscheduler(0);
+	sched_getparam(0, &p);
+	tamis_priv.priority = p.sched_priority;
+
+	sched_setscheduler(0, SCHED_FIFO, &p_boosted);
+}
+
+static void priority_unboost(void)
+{
+	struct sched_param p = { .sched_priority = tamis_priv.priority };
+
+	sched_setscheduler(0, tamis_priv.policy, &p);
+}
+
+static int nesting = 0;
+
 static void signal_segv(int signum, siginfo_t * info, void* stack)
 {
-	void **ebp = 0;
-	void *eip = 0;
-	void *next_insn = 0;
+	void **ebp;
+	void *eip;
+	void *next_insn;
 	struct tamis_memzone *mz;
-	int len;
+	int len, ret;
 	ucontext_t *ucontext = stack;
 
 	/* unlocked after signal_trap */
-	orig_pthread_mutex_lock(&tamis_lock);
+	ret = pthread_mutex_lock(&tamis_lock);
+	assert(ret == 0);
+	assert(nesting == 0);
+	nesting++;
+
+	priority_boost();
 
 	eip = (void *)ucontext->uc_mcontext.gregs[REG_EIP];
 	pr_debug("signal_sigsegv: Accessing %p triggered a sigsev, eip is %p\n", info->si_addr, eip);
 	mz = find_memzone(info->si_addr);
 
-	/*dump_mem(stack, 256, 4);*/
 	if (mz) {
 
 		len = insn_len(eip);
 		if (len < 0) {
 			fprintf(stderr, "Unknown opcode 0x%02x at %p\n", ((uint8_t*)eip)[0], eip);
-			exit(0);
+			assert(0);
 		}
 		next_insn = eip + len;
 
@@ -244,28 +212,64 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		tamis_priv.to_protect_len = mz->len;
 		unprotect(mz);
 
+		/* Is the accessed memory being observed ? ... */
 		if (mz_includes(info->si_addr, mz)) {
-			tamis_action(&tamis_priv, eip);
+			int ret, protected = 0;
+
+			/* ... yes, take the appropriate mz->action */
+			switch(mz->type) {
+			case MUTEX_LOCK_PROTECTED:
+				ret = pthread_mutex_trylock(mz->action.m);
+				if (ret == EBUSY) {
+					protected = 1;
+				} else {
+					pthread_mutex_unlock(mz->action.m);
+				}
+				//fprintf(stderr, "Access @ %p was %sprotected by lock %p\n", eip,
+				//	protected ? "" : "not ", mz->action.m);
+				break;
+			case CALLBACK:
+				mz->action.cb(mz->mem);
+				break;
+			default:
+				assert(0);
+			}
 		}
 	} else {
 		fprintf(stderr, "not our sigsegv at %p\n", info->si_addr);
-		while(1);
-		exit(0);
+		assert(0);
 	}
 	return;
 }
 
-static void tamis_default_action(struct tamis_private *priv, void *eip)
+static void signal_trap(int signum, siginfo_t * info, void* stack)
 {
-#if 0
-	/* even number of lockings == NOK */
-	if ((priv->lock_level & 1) ^ 1) {
-		fprintf(stderr, "suspicious access from %p %d\n", eip, priv->lock_level);
-	}
-#else
+	int ret;
+	int8_t *eip;
+	ucontext_t *ucontext = stack;
+
+	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
+
+	pr_debug("signal_trap   : Caught a trap at eip %p\n", eip);
+	exepage_unprotect(eip);
+	pr_debug("signal_trap   : Restoring old opcode: 0x%2x at %p\n", tamis_priv.old_opcode, eip);
+	eip[0] = tamis_priv.old_opcode;
+	exepage_protect(eip);
+
+	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
+	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
+	protect(tamis_priv.to_protect_mem, tamis_priv.to_protect_len);
+
+	priority_unboost();
+	nesting--;
+	assert(nesting == 0);
+	/* locked in signal_segv */
+	ret = pthread_mutex_unlock(&tamis_lock);
+	assert(ret == 0);
+
 	return;
-#endif
 }
+
 void tamis_unprotect(void *p)
 {
 	struct tamis_memzone *mz;
@@ -276,25 +280,29 @@ void tamis_unprotect(void *p)
 	del_memzone(mz);
 }
 
-int tamis_protect(void *p, size_t len)
+int tamis_protect(void *p, size_t len, enum tamis_type t, void *arg)
 {
-	add_memzone(p, len);
+	struct tamis_memzone *mz;
+	mz = add_memzone(p, len);
+	mz->type = t;
+	mz->action.action = arg;
 	return protect(p, len);
 }
 
-#define HIJACK(a, x, y) if (!(orig_##x = dlsym(a , y))) {\
-			   fprintf(stderr, "symbol %s() not found, exiting\n", #y);\
-                	   exit(-1);\
-                        }
-int tamis_init(void (*tamis_action_cb)(struct tamis_private *, void *))
+void *tamis_alloc(size_t size)
+{
+	return malloc((size / PAGE_SIZE) * PAGE_SIZE + PAGE_SIZE);
+}
+void tamis_free(void *p)
+{
+	free(p);
+}
+int tamis_init()
 {
 	struct sigaction action;
 	void *__attribute__((unused)) lib_handle = NULL;
-	tamis_action = tamis_default_action;
 
-	if (tamis_action_cb)
-		tamis_action = tamis_action_cb;
-
+ 	tamis_lock.__data.__kind = PTHREAD_MUTEX_ERRORCHECK_NP;
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = signal_segv;
 	action.sa_flags = SA_SIGINFO;
@@ -308,17 +316,6 @@ int tamis_init(void (*tamis_action_cb)(struct tamis_private *, void *))
 	if(sigaction(SIGTRAP, &action, NULL) < 0) {
 		return -1;
 	}
-
-	if ( (lib_handle = dlopen("libpthread.so", RTLD_NOW)) == NULL) {
-		if ( (lib_handle = dlopen("libpthread.so.0", RTLD_NOW)) == NULL) {
-			fprintf(stderr, "error loading libpthread!\n");
-			return -1;
-		}
-	}
-
-	HIJACK(lib_handle, pthread_mutex_lock, "pthread_mutex_lock");
-	HIJACK(lib_handle, pthread_mutex_unlock, "pthread_mutex_unlock");
-
 	return 0;
 }
 

@@ -1,6 +1,6 @@
 /*
     tamis.h - Header exporting tamis functions
-    Copyright (C) 2007  Frederik Deweerdt <frederik.deweerdt@gmail.com>
+    Copyright (C) 2007, 2008  Frederik Deweerdt <frederik.deweerdt@gmail.com>
 
     This program is free software; you can redistribute it and/or modify
     it under the terms of the GNU General Public License as published by
@@ -22,17 +22,70 @@
 
 #include <asm/page.h>
 
+
+void *tamis_alloc(size_t);
+void tamis_free(void *);
+
+#ifndef __KERNEL__
+
+#include <stdio.h>
+#include <linux/netfilter.h>
+
+#define printk printf
+#define KERN_ERR
+
+#endif
+
+static void dump_line(char *data, int offset, int limit)
+{
+	int i;
+
+	printk(KERN_ERR "%03x:", offset);
+	for (i = 0; i < limit; i++) {
+		printk(" %02x", (unsigned char)data[offset + i]);
+	}
+	printk("\n");
+}
+static void __attribute__((unused)) dump_zone(void *buf, int len)
+{
+	int i;
+	char *data = buf;
+
+	printk(KERN_ERR "================================================================================\n");
+	for (i=0; i < len; i+=16) {
+		int limit;
+		limit = 16;
+		if (i + limit > len)
+			limit = len - i;
+		dump_line(data, i, limit);
+	}
+	printk(KERN_ERR "================================================================================\n");
+}
+
+
 struct tamis_private {
 	uint8_t old_opcode;
 	void *to_protect_mem;
 	size_t to_protect_len;
-	int lock_level;
+	int policy;
+	int priority;
+};
+
+enum tamis_type {
+	MUTEX_LOCK_PROTECTED,
+	CALLBACK,
 };
 
 struct tamis_memzone {
 	void *mem;
 	void *page;
 	int len;
+	enum tamis_type type;
+	union {
+		pthread_mutex_t *m;
+		int (*cb)(void *);
+		void *action;
+	} action;
 };
 
 #ifdef __i386__
@@ -59,17 +112,14 @@ void tamis_unprotect(void *p);
  * @return 0 in case of success, -1 otherwise. errno is set with the
  * approriate value
  **/
-int tamis_protect(void *p, size_t len);
+int tamis_protect(void *p, size_t len, enum tamis_type t, void *arg);
 
 /**
  * @brief Initialize the tamis library
- * The following actions are taken:
- * - install SIGSEGV and SIGTRAP signal handlers
- * - re-route pthread_mutex_{un,}lock calls
  *
  * @return 0 in case of success, -1 otherwise. errno is set with the
  * approriate value
  **/
-int tamis_init(void (*tamis_action_cb)(struct tamis_private *, void *));
+int tamis_init();
 
 #endif /* __TAMIS_H__ */

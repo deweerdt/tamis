@@ -1,11 +1,31 @@
 SET(LIB_NAME tamis)
 
+cmake_minimum_required(VERSION 2.6)
+if(COMMAND cmake_policy)
+	cmake_policy(SET CMP0003 NEW)
+endif(COMMAND cmake_policy)
+
 ADD_LIBRARY(${LIB_NAME} SHARED tamis.c)
 ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall -L/opt/tsp/lib)
 SET_TARGET_PROPERTIES(${LIB_NAME} PROPERTIES LINK_FLAGS "-nostartfiles")
 
-TARGET_LINK_LIBRARIES(${LIB_NAME})
+TARGET_LINK_LIBRARIES(${LIB_NAME} pthread)
 
-ADD_EXECUTABLE(tamis_test tamis_test.c tamis.c)
-TARGET_LINK_LIBRARIES(tamis_test pthread dl bb)
-TARGET_LINK_LIBRARIES(tamis_test ${LIB_NAME})
+INCLUDE_DIRECTORIES(${CMAKE_SOURCE_DIR})
+
+SET(TEST test1)
+ADD_EXECUTABLE(${TEST} tests/${TEST}.c)
+TARGET_LINK_LIBRARIES(${TEST} ${LIB_NAME})
+
+SET(TEST test2)
+ADD_EXECUTABLE(${TEST} tests/${TEST}.c)
+TARGET_LINK_LIBRARIES(${TEST} ${LIB_NAME})
+
+SET(TEST test3)
+ADD_EXECUTABLE(${TEST} tests/${TEST}.c)
+TARGET_LINK_LIBRARIES(${TEST} ${LIB_NAME})
+
+
+ENABLE_TESTING()
+ADD_TEST(UnprotectedAccess ${CMAKE_SOURCE_DIR}/tests/test1.sh)
+ADD_TEST(ProtectedAccess ${CMAKE_SOURCE_DIR}/tests/test2.sh)
