@@ -151,6 +151,26 @@ static struct tamis_memzone *find_memzone(void *p)
 	return NULL;
 }
 
+static void priority_boost(void)
+{
+	struct sched_param p;
+	struct sched_param p_boosted = { .sched_priority = 99 };
+	tamis_priv.policy = sched_getscheduler(0);
+	sched_getparam(0, &p);
+	tamis_priv.priority = p.sched_priority;
+
+	sched_setscheduler(0, SCHED_FIFO, &p_boosted);
+}
+
+static void priority_unboost(void)
+{
+	struct sched_param p = { .sched_priority = tamis_priv.priority };
+
+	sched_setscheduler(0, tamis_priv.policy, &p);
+}
+
+static int nesting = 0;
+
 static void signal_segv(int signum, siginfo_t * info, void* stack)
 {
 	void **ebp;
@@ -163,6 +183,10 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 	/* unlocked after signal_trap */
 	ret = pthread_mutex_lock(&tamis_lock);
 	assert(ret == 0);
+	assert(nesting == 0);
+	nesting++;
+
+	priority_boost();
 
 	eip = (void *)ucontext->uc_mcontext.gregs[REG_EIP];
 	pr_debug("signal_sigsegv: Accessing %p triggered a sigsev, eip is %p\n", info->si_addr, eip);
@@ -180,7 +204,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		exepage_unprotect(next_insn);
 		tamis_priv.old_opcode = ((uint8_t *)next_insn)[0];
 		pr_debug("signal_sigsegv: Setting BREAK at %p, opcode was 0x%02x\n", next_insn, ((uint8_t *)next_insn)[0]);
-		((uint8_t *)next_insn)[0] = 0xc3; //BREAK_INSN;
+		((uint8_t *)next_insn)[0] = BREAK_INSN;
 		exepage_protect(next_insn);
 
 		ebp = (void**)ucontext->uc_mcontext.gregs[REG_EBP];
@@ -201,8 +225,8 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 				} else {
 					pthread_mutex_unlock(mz->action.m);
 				}
-				fprintf(stderr, "Access @ %p was %sprotected by lock %p\n", eip,
-					protected ? "" : "not ", mz->action.m);
+				//fprintf(stderr, "Access @ %p was %sprotected by lock %p\n", eip,
+				//	protected ? "" : "not ", mz->action.m);
 				break;
 			case CALLBACK:
 				mz->action.cb(mz->mem);
@@ -215,35 +239,33 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 		fprintf(stderr, "not our sigsegv at %p\n", info->si_addr);
 		assert(0);
 	}
-	asm volatile ("call *%0" : : "m"(eip));
-
-	/* restore the old code */
-	pr_debug("signal_segv   : Caught a trap at eip %p\n", eip);
-	exepage_unprotect((void *)next_insn);
-	pr_debug("signal_segv   : Restoring old opcode: 0x%2x at %p\n", tamis_priv.old_opcode, eip);
-	((uint8_t *)next_insn)[0] = tamis_priv.old_opcode;
-	exepage_protect((void *)next_insn);
-
-	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
-	protect(tamis_priv.to_protect_mem, tamis_priv.to_protect_len);
-
-	/* locked in signal_segv */
-	ret = pthread_mutex_unlock(&tamis_lock);
-	assert(ret == 0);
-
 	return;
 }
 
 static void signal_trap(int signum, siginfo_t * info, void* stack)
 {
+	int ret;
 	int8_t *eip;
 	ucontext_t *ucontext = stack;
 
-	assert(0);
 	eip = (int8_t *)ucontext->uc_mcontext.gregs[REG_EIP] - 1;
 
+	pr_debug("signal_trap   : Caught a trap at eip %p\n", eip);
+	exepage_unprotect(eip);
+	pr_debug("signal_trap   : Restoring old opcode: 0x%2x at %p\n", tamis_priv.old_opcode, eip);
+	eip[0] = tamis_priv.old_opcode;
+	exepage_protect(eip);
 
 	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
+	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
+	protect(tamis_priv.to_protect_mem, tamis_priv.to_protect_len);
+
+	priority_unboost();
+	nesting--;
+	assert(nesting == 0);
+	/* locked in signal_segv */
+	ret = pthread_mutex_unlock(&tamis_lock);
+	assert(ret == 0);
 
 	return;
 }
