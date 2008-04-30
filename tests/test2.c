@@ -23,12 +23,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <errno.h>
 
 #include "tamis.h"
 
 
 static int *shared_var = 0;
 pthread_mutex_t shared_var_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int verify_callback()
+{
+	if (pthread_mutex_trylock(&shared_var_mutex) == EBUSY) {
+		fprintf(stderr, "Access was protected by lock %p\n", &shared_var_mutex);
+	} else {
+		pthread_mutex_unlock(&shared_var_mutex);
+	}
+	return 1;
+}
 
 /* Test 2: protected single access */
 int main()
@@ -38,7 +49,7 @@ int main()
 	fprintf(stderr, "Lock is %p\n", &shared_var_mutex);
 
 	shared_var = tamis_alloc(sizeof(*shared_var));
-	tamis_protect((void *)shared_var, sizeof(*shared_var), MUTEX_LOCK_PROTECTED, &shared_var_mutex);
+	tamis_protect((void *)shared_var, sizeof(*shared_var), CALLBACK, verify_callback);
 
 	pthread_mutex_lock(&shared_var_mutex);
 	*shared_var = 0;

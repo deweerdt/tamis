@@ -54,40 +54,40 @@ static __tamis int imz = 0;
 static int insn_len(uint8_t *opcode)
 {
 	switch (opcode[0]) {
-		case 0xa1:
-			return 5;
-		case 0xa3:
-			return 5;
-		case 0xc7: /* takes an arg */
-			switch(opcode[1]) {
-			case 0x00:
-				return 6;
-			case 0x04:
-				return 7;
-			case 0x05:
-				return 10;
-			case 0x44:
-				return 8;
-			default:
-				fprintf(stderr, "Unknown opcode 0xc7 %d\n", opcode[1]);
-				assert(0);
-			}
-		case 0x8b:
-			return 2;
-		case 0x89:
-			switch(opcode[1]) {
-			case 0x04:
-				return 3;
-			default:
-				return 2;
-			}
-		case 0xa5:
-			return 1;
-		case 0xf3:
-			return 1;
+	case 0xa1:
+		return 5;
+	case 0xa3:
+		return 5;
+	case 0xc7: /* takes an arg */
+		switch (opcode[1]) {
+		case 0x00:
+			return 6;
+		case 0x04:
+			return 7;
+		case 0x05:
+			return 10;
+		case 0x44:
+			return 8;
 		default:
-			fprintf(stderr, "Unknown opcode 0x%02x\n", opcode[0]);
+			fprintf(stderr, "Unknown opcode 0xc7 %d\n", opcode[1]);
 			assert(0);
+		}
+	case 0x8b:
+		return 2;
+	case 0x89:
+		switch (opcode[1]) {
+		case 0x04:
+			return 3;
+		default:
+			return 2;
+		}
+	case 0xa5:
+		return 1;
+	case 0xf3:
+		return 1;
+	default:
+		fprintf(stderr, "Unknown opcode 0x%02x\n", opcode[0]);
+		assert(0);
 	}
 }
 
@@ -195,6 +195,7 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 	if (mz) {
 
 		len = insn_len(eip);
+		pr_debug("instruction len is %d\n", len);
 		if (len < 0) {
 			fprintf(stderr, "Unknown opcode 0x%02x at %p\n", ((uint8_t*)eip)[0], eip);
 			assert(0);
@@ -214,19 +215,17 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 
 		/* Is the accessed memory being observed ? ... */
 		if (mz_includes(info->si_addr, mz)) {
-			int ret, protected = 0;
+			int ret;
 
 			/* ... yes, take the appropriate mz->action */
 			switch(mz->type) {
 			case MUTEX_LOCK_PROTECTED:
 				ret = pthread_mutex_trylock(mz->action.m);
-				if (ret == EBUSY) {
-					protected = 1;
-				} else {
+				if (ret != EBUSY) {
 					pthread_mutex_unlock(mz->action.m);
+					fprintf(stderr, "Access @ %p was not protected by lock %p\n", eip, mz->action.m);
+					abort();
 				}
-				//fprintf(stderr, "Access @ %p was %sprotected by lock %p\n", eip,
-				//	protected ? "" : "not ", mz->action.m);
 				break;
 			case CALLBACK:
 				mz->action.cb(mz->mem);
@@ -236,9 +235,13 @@ static void signal_segv(int signum, siginfo_t * info, void* stack)
 			}
 		}
 	} else {
-		fprintf(stderr, "not our sigsegv at %p\n", info->si_addr);
+		fprintf(stderr, "not our sigsegv mem at:%p, eip at : %p\n", info->si_addr, eip);
 		assert(0);
 	}
+
+	asm("clflush (%0) " :: "r" (eip) : "memory");
+	asm volatile("mfence");
+
 	return;
 }
 
@@ -256,6 +259,9 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 	eip[0] = tamis_priv.old_opcode;
 	exepage_protect(eip);
 
+	asm("clflush (%0) " :: "r" (eip) : "memory");
+	asm volatile("mfence");
+
 	ucontext->uc_mcontext.gregs[REG_EIP] = (int)eip;
 	/* reprotect the zone that triggered the sigsegv/sigtrap stuff */
 	protect(tamis_priv.to_protect_mem, tamis_priv.to_protect_len);
@@ -263,6 +269,7 @@ static void signal_trap(int signum, siginfo_t * info, void* stack)
 	priority_unboost();
 	nesting--;
 	assert(nesting == 0);
+
 	/* locked in signal_segv */
 	ret = pthread_mutex_unlock(&tamis_lock);
 	assert(ret == 0);
