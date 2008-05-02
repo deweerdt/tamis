@@ -21,6 +21,7 @@
 #define __TAMIS_H__
 
 #include <asm/page.h>
+#include <sys/queue.h>
 
 
 void *tamis_alloc(size_t);
@@ -81,14 +82,16 @@ struct tamis_memzone {
 	void *page;
 	int len;
 	enum tamis_type type;
+#define INSN_MAX 20
 	union {
 		pthread_mutex_t *m;
 		int (*cb)(void *);
 		void *action;
 	} action;
+	LIST_ENTRY(tamis_memzone) list;
 };
 
-#ifdef __i386__
+#if defined(__i386__) || defined(__x86_64__)
 #define BREAK_INSN 0xcc
 #else
 #error "Unknown arch, sorry"

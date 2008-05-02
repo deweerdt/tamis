@@ -26,8 +26,8 @@
 
 #include "tamis.h"
 
-#define LOOPS 10000
-#define THREADS 30
+#define LOOPS 100000
+#define THREADS 4
 
 static int *shared_var;
 pthread_mutex_t shared_var_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -57,7 +57,7 @@ int main()
 	for (i = 0; i < THREADS; i++) {
 		pthread_create(&t[i], NULL, access_shared_var, NULL);
 	}
-	//asm volatile("aze: jmp aze;\n");
+
 	for (i = 0; i < THREADS; i++) {
 		pthread_join(t[i], NULL);
 	}
