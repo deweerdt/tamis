@@ -99,6 +99,10 @@ static struct tamis_memzone *find_memzone(void *p)
 	pr_debug("find return null for %p\n", p);
 	return NULL;
 }
+#if defined(__i386__)
+#define REG_RIP REG_EIP
+#endif
+
 
 static void signal_segv (int sig, siginfo_t *sip, void *context)
 {
@@ -106,11 +110,8 @@ static void signal_segv (int sig, siginfo_t *sip, void *context)
 	struct tamis_memzone *mz;
 	ucontext_t *ucp = context;
 
-#if defined(__i386__)
-	eip = (void *)ucp->uc_mcontext.gregs[REG_EIP];
-#else
 	eip = (void *)ucp->uc_mcontext.gregs[REG_RIP];
-#endif
+
 	pthread_mutex_lock(&memzone_lock);
 	mz = find_memzone(sip->si_addr);
 
