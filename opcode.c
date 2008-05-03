@@ -4,6 +4,11 @@
 #include <assert.h>
 #include <ucontext.h>
 
+#if defined(__i386__)
+#define REG_RAX REG_EAX
+#define REG_RSI REG_ESI
+#endif
+
 int single_step(uint8_t *ip, mcontext_t *context, void *address)
 {
 	switch (*ip) {
