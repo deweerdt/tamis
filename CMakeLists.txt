@@ -5,7 +5,7 @@ if(COMMAND cmake_policy)
 	cmake_policy(SET CMP0003 NEW)
 endif(COMMAND cmake_policy)
 
-ADD_LIBRARY(${LIB_NAME} SHARED tamis.c)
+ADD_LIBRARY(${LIB_NAME} SHARED tamis.c opcode.c)
 ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall -L/opt/tsp/lib)
 SET_TARGET_PROPERTIES(${LIB_NAME} PROPERTIES LINK_FLAGS "-nostartfiles")
 

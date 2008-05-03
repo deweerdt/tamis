@@ -26,8 +26,8 @@
 
 #include "tamis.h"
 
-#define LOOPS 100000
-#define THREADS 4
+#define LOOPS 1000000
+#define THREADS 200
 
 static int *shared_var;
 pthread_mutex_t shared_var_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -36,11 +36,14 @@ void *access_shared_var(void *arg)
 {
 	int i;
 	for (i = 0; i < LOOPS; i++) {
-		pthread_mutex_lock(&shared_var_mutex);
 		*shared_var = i;
-		pthread_mutex_unlock(&shared_var_mutex);
 	}
 	return NULL;
+}
+
+int f()
+{
+	return 0;
 }
 
 /* Test 3: threaded access */
@@ -52,7 +55,7 @@ int main()
 	shared_var = tamis_alloc(sizeof(*shared_var));
 
 	tamis_init();
-	tamis_protect((void *)shared_var, sizeof(*shared_var), MUTEX_LOCK_PROTECTED, &shared_var_mutex);
+	tamis_protect((void *)shared_var, sizeof(*shared_var), CALLBACK, f);
 
 	for (i = 0; i < THREADS; i++) {
 		pthread_create(&t[i], NULL, access_shared_var, NULL);

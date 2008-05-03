@@ -28,7 +28,7 @@
 #include "tamis.h"
 
 
-static volatile int __tamis shared_var;
+int __tamis shared_var = 0x12345678;
 
 pthread_mutex_t shared_var_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -45,15 +45,15 @@ int verify_callback()
 /* Test 1: unprotected single access */
 int main()
 {
-	int i = 0;
 	fprintf(stderr, "Lock is %p\n", &shared_var_mutex);
 	tamis_init();
 	tamis_protect((void *)&shared_var, sizeof(shared_var), CALLBACK, verify_callback);
 
-	//shared_var = 1;
-	i = shared_var;
-
-	printf("%d\n", i);
+	printf("0x%x\n", shared_var);
+	
 	tamis_unprotect((void *)&shared_var);
+
+
+
 	return 0;
 }
