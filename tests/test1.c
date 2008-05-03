@@ -45,12 +45,15 @@ int verify_callback()
 /* Test 1: unprotected single access */
 int main()
 {
+	int i = 0;
 	fprintf(stderr, "Lock is %p\n", &shared_var_mutex);
 	tamis_init();
 	tamis_protect((void *)&shared_var, sizeof(shared_var), CALLBACK, verify_callback);
 
-	shared_var = 0;
+	//shared_var = 1;
+	i = shared_var;
 
+	printf("%d\n", i);
 	tamis_unprotect((void *)&shared_var);
 	return 0;
 }

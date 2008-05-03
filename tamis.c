@@ -184,6 +184,7 @@ static int nesting = 0;
 static void signal_segv (int sig, siginfo_t *sip, void *context)
 {
 	void *eip;
+	greg_t cr2;
 	void *next_insn;
 	struct tamis_memzone *mz;
 	int len, ret;
@@ -202,8 +203,9 @@ static void signal_segv (int sig, siginfo_t *sip, void *context)
 	eip = (void *)ucp->uc_mcontext.gregs[REG_EIP];
 #else
 	eip = (void *)ucp->uc_mcontext.gregs[REG_RIP];
+	cr2 = ucp->uc_mcontext.gregs[REG_CR2];
 #endif
-	pr_debug("signal_sigsegv: Accessing %p triggered a sigsev, eip is %p\n", sip->si_addr, eip);
+	printf("signal_sigsegv: Accessing %p triggered a sigsev, eip is %p 0x%X\n", sip->si_addr, eip, cr2);
 	pthread_mutex_lock(&memzone_lock);
 	mz = find_memzone(sip->si_addr);
 
