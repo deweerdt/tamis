@@ -35,6 +35,10 @@ int single_step(uint8_t *ip, mcontext_t *context, void *address)
 			assert(0);
 		}
 	/* mov */
+	case 0xa1:
+		context->gregs[REG_RAX] = *(uint32_t *)address;
+		return 5;
+	/* mov */
 	case 0xc7:
 		++ip;
 		switch (*ip) {
