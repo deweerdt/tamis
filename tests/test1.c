@@ -53,7 +53,5 @@ int main()
 	
 	tamis_unprotect((void *)&shared_var);
 
-
-
 	return 0;
 }

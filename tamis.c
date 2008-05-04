@@ -66,8 +66,10 @@ static __tamis pthread_mutex_t memzone_lock = PTHREAD_MUTEX_INITIALIZER;
 
 static void del_memzone(struct tamis_memzone *mz)
 {
+	LIST_REMOVE(mz, list);
 	free(mz);
 }
+
 static struct tamis_memzone *add_memzone(void *p, size_t len)
 {
 	struct tamis_memzone *mz = calloc(1, sizeof(*mz));
