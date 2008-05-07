@@ -50,7 +50,7 @@ int main()
 	tamis_protect((void *)&shared_var, sizeof(shared_var), CALLBACK, verify_callback);
 
 	printf("0x%x\n", shared_var);
-	
+
 	tamis_unprotect((void *)&shared_var);
 
 	return 0;

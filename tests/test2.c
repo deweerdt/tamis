@@ -52,7 +52,7 @@ int main()
 	tamis_protect((void *)shared_var, sizeof(*shared_var), CALLBACK, verify_callback);
 
 	pthread_mutex_lock(&shared_var_mutex);
-	*shared_var = 0;
+	*shared_var = 1;
 	pthread_mutex_unlock(&shared_var_mutex);
 
 	tamis_unprotect((void *)shared_var);
