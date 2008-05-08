@@ -24,6 +24,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <ucontext.h>
 #include <stdarg.h>
 
@@ -34,13 +35,19 @@
 #define REG_RCX REG_ECX
 #define REG_RDX REG_EDX
 #define REG_RSI REG_ESI
+#define REG_RSP REG_ESP
+#define REG_RIP REG_EIP
 #endif
 
 struct opcode_str {
 	char opcode[32];
 	char src[32];
+	unsigned long long soffset;
+	int has_soffset;
 	char dest[32];
-	int asm_len;
+	unsigned long long doffset;
+	int has_doffset;
+	int asm_len; 	/* the length of the decoded opcode */
 };
 
 static struct opcode_str *parse_disassembly(char *str)
@@ -48,6 +55,8 @@ static struct opcode_str *parse_disassembly(char *str)
 	struct opcode_str *op;
 	char *p = str, *d;
 	int first_comma = 1;
+	int spaces = 0;
+	char buf[32];
 
 	op = calloc(1, sizeof(*op));
 	if (!op)
@@ -55,13 +64,18 @@ static struct opcode_str *parse_disassembly(char *str)
 
 	d = op->opcode;
 	do {
-		if (*p == ' ') {
+		/* we parsed the opcode, parse the src now */
+		if (*p == ' ' && !spaces) {
 			*d = '\0';
 			d = op->src;
 			/* skip extraneaous whitespaces */
 			while (*p == ' ')
 				p++;
+			spaces++;
 		}
+		
+
+		/* we parsed the src, parse the dest now */
 		if (*p == ',' && first_comma) {
 			*d = '\0';
 			d = op->dest;
@@ -69,7 +83,17 @@ static struct opcode_str *parse_disassembly(char *str)
 			first_comma = 0;
 		}
 		*d++ = *p++;
-	} while(*p);
+	} while(*p && !(*p == ' ' && spaces > 1));
+
+	memcpy(buf, op->src, sizeof(buf));
+	if (sscanf(buf, "%lli(%s)", &op->soffset, op->src) == 2) {
+		op->has_soffset = 1;
+	}
+
+	memcpy(buf, op->dest, sizeof(buf));
+	if (sscanf(buf, "%lli(%s)", &op->doffset, op->dest) == 2) {
+		op->has_doffset = 1;
+	}
 
 	return op;
 }
@@ -144,6 +168,11 @@ static struct opcode_str *disassemble_insn_at(uint8_t *address)
 	disasm_info.buffer = address;
 	disasm_info.buffer_vma = (bfd_vma)address;
 	disasm_info.buffer_length = 64; /* XXX: should be the max len of an insn */
+#if defined(__i386__)
+	disasm_info.disassembler_options = "i386";
+#else
+	disasm_info.disassembler_options = "x86-64";
+#endif
 
 	asm_len = print_insn_i386((bfd_vma)address, &disasm_info);
 
@@ -161,6 +190,7 @@ out:
 
 enum location_type {
 	REGISTER,
+	REGISTER_DEREF,
 	IMMEDIATE,
 	ADDRESS,
 };
@@ -172,6 +202,8 @@ struct location {
 		unsigned long reg_no;
 		unsigned long address;
 	};
+	unsigned long offset;
+	unsigned long size;
 };
 static struct location *str_to_location(const char *str)
 {
@@ -181,9 +213,15 @@ static struct location *str_to_location(const char *str)
 	if (!l)
 		return NULL;
 
+	l->size = 64;
+
 	while ((*str == '%' || *str == '('
-	        || *str == 'e') && *str != '\0' )
+	        || *str == 'e' || *str == 'r') && *str != '\0' ) {
+		if (*str == 'e') {
+			l->size = 32;
+		}
 		str++;
+	}
 
 	if (*str == '\0')
 		return NULL;
@@ -196,14 +234,18 @@ static struct location *str_to_location(const char *str)
 	}
 
 	/* address value */
-	if (*str == '0' && *(str + 1) == 'x') {
+	if (*str == '0' && *(str + 1) == 'x' && !index(str, '(')) {
 		l->type = ADDRESS;
 		l->address = strtol(str, NULL, 0);
 		goto out;
 	}
 
 	/* register */
-	l->type = REGISTER;
+	if (index(str, ')'))
+		l->type = REGISTER_DEREF;
+	else
+		l->type = REGISTER;
+
 	switch (*str) {
 	case 'a':
 		l->reg_no = REG_RAX;
@@ -217,6 +259,18 @@ static struct location *str_to_location(const char *str)
 	case 'd':
 		l->reg_no = REG_RDX;
 		goto out;
+	case 'i':
+		l->reg_no = REG_RIP;
+		goto out;
+	case 's':
+		switch(*(str+1)) {
+		case 'i':
+			l->reg_no = REG_RSI;
+			goto out;
+		case 'p':
+			l->reg_no = REG_RSP;
+			goto out;
+		}
 	}
 
 	abort();
@@ -224,24 +278,60 @@ out:
 	return l;
 }
 
-int32_t *get_val_addr(struct location *l, mcontext_t *context)
+unsigned long get_val_addr(struct location *l, mcontext_t *context)
 {
-	int32_t *ret = NULL;
+	unsigned long ret = 0;
 	switch (l->type) {
+	case REGISTER_DEREF:
+		ret = context->gregs[l->reg_no];
+		break;
 	case REGISTER:
-		ret = &context->gregs[l->reg_no];
+		ret = (unsigned long)&context->gregs[l->reg_no];
 		break;
 	case IMMEDIATE:
-		ret = (void *)&l->immediate;
+		ret = (unsigned long)&l->immediate;
 		break;
 	case ADDRESS:
-		ret = (void *)l->address;
+		ret = l->address;
 		break;
 	default:
 		abort();
 	}
 	return ret;
 }
+
+#if defined(x86_64)
+static char *regname(int regno)
+{
+	static char regs[][32] = {
+		[REG_R8] = "REG_R8",
+		[REG_R9] = "REG_R9",
+		[REG_R10] = "REG_R10",
+		[REG_R11] = "REG_R11",
+		[REG_R12] = "REG_R12",
+		[REG_R13] = "REG_R13",
+		[REG_R14] = "REG_R14",
+		[REG_R15] = "REG_R15",
+		[REG_RDI] = "REG_RDI",
+		[REG_RSI] = "REG_RSI",
+		[REG_RBP] = "REG_RBP",
+		[REG_RBX] = "REG_RBX",
+		[REG_RDX] = "REG_RDX",
+		[REG_RAX] = "REG_RAX",
+		[REG_RCX] = "REG_RCX",
+		[REG_RSP] = "REG_RSP",
+		[REG_RIP] = "REG_RIP",
+		[REG_EFL] = "REG_EFL",
+		[REG_CSGSFS] = "REG_CSGSFS",
+		[REG_ERR] = "REG_ERR",
+		[REG_TRAPNO] = "REG_TRAPNO",
+		[REG_OLDMASK] = "REG_OLDMASK",
+		[REG_CR2] = "REG_CR2"
+	};
+	return regs[regno];
+}
+#endif
+
 int single_step(uint8_t *ip, mcontext_t *context, void *address)
 {
 	int is_write, ret;
@@ -257,19 +347,47 @@ int single_step(uint8_t *ip, mcontext_t *context, void *address)
 	if (1) {
 		struct location *src_l;
 		struct location *dest_l;
-		int32_t *src_p;
-		int32_t *dest_p;
+		unsigned long *src_p;
+		unsigned long *dest_p;
+		int size;
+		int8_t *d, *s;
 
 		src_l = str_to_location(op->src);
 		assert(src_l);
 		dest_l = str_to_location(op->dest);
 		assert(dest_l);
 
-		src_p = get_val_addr(src_l, context);
-		dest_p = get_val_addr(dest_l, context);
+		src_p = (void *)get_val_addr(src_l, context);
+		dest_p = (void *)get_val_addr(dest_l, context);
 
-		*dest_p = *src_p;
+#define SOFFSET(x) ((x->has_soffset) ? (x->soffset) : 0)
+#define DOFFSET(x) ((x->has_doffset) ? (x->doffset) : 0)
 
+		size = src_l->size > dest_l->size ? dest_l->size : src_l->size;
+		d = ((int8_t *)dest_p) + DOFFSET(op);
+		s = ((int8_t *)src_p) + SOFFSET(op);
+#if 0
+		printf("rip: %p,  rax: %p\n", (void *)context->gregs[REG_RIP], (void *)context->gregs[REG_RAX]);
+		printf("src : reg: %s, soffset: 0x%llx\n", regname(src_l->reg_no), SOFFSET(op));
+		printf("dest: reg: %s, doffset: 0x%llx\n", regname(dest_l->reg_no), DOFFSET(op));
+#endif
+		switch (size) {
+		case 64:
+			d[8] = s[8];
+			d[7] = s[7];
+			d[6] = s[6];
+			d[4] = s[4];
+		case 32:
+			d[3] = s[3];
+			d[2] = s[2];
+		case 16:
+			d[1] = s[1];
+		case 8:
+			d[0] = s[0];
+			break;
+		default:
+			assert(size != size);
+		}
 		free(src_l);
 		free(dest_l);
 	}

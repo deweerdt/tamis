@@ -35,7 +35,7 @@ int verify_callback()
 	return 1;
 }
 
-#define LOOPS (1024 * 10)
+#define LOOPS (1000)
 
 static void print_time(struct timeval before, struct timeval after)
 {
@@ -72,5 +72,6 @@ int main()
 
 	print_time(before, after);
 
+	printf("%d == %d\n", shared_var, old_shared_var);
 	return !(shared_var == old_shared_var);
 }
