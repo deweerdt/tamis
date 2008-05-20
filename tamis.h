@@ -125,4 +125,16 @@ int tamis_protect(void *p, size_t len, enum tamis_type t, void *arg);
  **/
 int tamis_init();
 
+#if defined(__i386__)
+# define REG_RAX	REG_EAX
+# define REG_RBX	REG_EBX
+# define REG_RCX	REG_ECX
+# define REG_RDX	REG_EDX
+# define REG_RDI	REG_EDI
+# define REG_RSI	REG_ESI
+# define REG_RIP	REG_EIP
+# define REG_RBP	REG_EBP
+# define REG_RSP	REG_ESP
+#endif
+
 #endif /* __TAMIS_H__ */

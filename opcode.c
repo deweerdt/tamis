@@ -28,14 +28,6 @@
 #include <stdarg.h>
 
 
-#if defined(__i386__)
-#define REG_RAX REG_EAX
-#define REG_RBX REG_EBX
-#define REG_RCX REG_ECX
-#define REG_RDX REG_EDX
-#define REG_RSI REG_ESI
-#endif
-
 struct opcode_str {
 	char opcode[32];
 	char src[32];
