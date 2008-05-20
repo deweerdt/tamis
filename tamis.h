@@ -82,7 +82,6 @@ struct tamis_memzone {
 	void *page;
 	int len;
 	enum tamis_type type;
-#define INSN_MAX 20
 	union {
 		pthread_mutex_t *m;
 		int (*cb)(void *);
