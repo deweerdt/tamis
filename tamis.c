@@ -193,8 +193,6 @@ void tamis_free(void *p)
 int tamis_init()
 {
 	struct sigaction action;
-	void *__attribute__((unused)) lib_handle = NULL;
-
 
 	memset(&action, 0, sizeof(action));
 	action.sa_sigaction = signal_segv;
