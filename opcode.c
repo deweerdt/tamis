@@ -28,6 +28,7 @@
 #include <ucontext.h>
 #include <stdarg.h>
 
+#include "tamis.h"
 
 struct opcode_str {
 	char opcode[32];
