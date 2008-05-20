@@ -28,15 +28,7 @@
 #include <ucontext.h>
 #include <stdarg.h>
 
-
-#if defined(__i386__)
-#define REG_RAX REG_EAX
-#define REG_RBX REG_EBX
-#define REG_RCX REG_ECX
-#define REG_RDX REG_EDX
-#define REG_RSI REG_ESI
-#define REG_RIP REG_EIP
-#endif
+#include "tamis.h"
 
 struct opcode_str {
 	char opcode[32];
@@ -299,7 +291,9 @@ unsigned long get_val_addr(struct location *l, mcontext_t *context)
 	return ret;
 }
 
-static char *regname(int regno)
+#if defined(x86_64)
+
+static char  __attribute__((unused)) *regname(int regno)
 {
 	static char regs[][32] = {
 		[REG_R8] = "REG_R8",
@@ -328,6 +322,15 @@ static char *regname(int regno)
 	};
 	return regs[regno];
 }
+
+#else
+
+static char __attribute__((unused)) *regname(int regno)
+{
+	return NULL;
+}
+
+#endif
 
 int single_step(uint8_t *ip, mcontext_t *context, void *address)
 {

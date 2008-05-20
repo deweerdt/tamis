@@ -84,6 +84,7 @@ static struct tamis_memzone *add_memzone(void *p, size_t len)
 
 	return mz;
 }
+
 static inline int mz_includes(void *p, struct tamis_memzone *mz)
 {
 	return p >= mz->mem && p < (mz->mem + mz->len);
@@ -101,10 +102,6 @@ static struct tamis_memzone *find_memzone(void *p)
 	pr_debug("find return null for %p\n", p);
 	return NULL;
 }
-#if defined(__i386__)
-#define REG_RIP REG_EIP
-#endif
-
 
 static void signal_segv (int sig, siginfo_t *sip, void *context)
 {

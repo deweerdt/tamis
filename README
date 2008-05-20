@@ -3,4 +3,3 @@ tamis : variable access checker
 
 Tamis is an utility allowing a programmer to specify memory zones that need checking when accessed.
 A typical use would be to check if a certain memory zone is accessed under a mutex. See the test utilities for some samples.
-You need to be root to use tamis, as mprotect and priority boosting trickery is involved.
