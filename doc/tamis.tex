@@ -1,0 +1,49 @@
+\documentclass[a4paper,11pt]{article}
+\usepackage[T1]{fontenc}
+\usepackage[verbose,hypertexnames=false,bookmarksopenlevel=1,bookmarksopen,bookmarksnumbered,colorlinks,plainpages=false,linktocpage]{hyperref}
+\usepackage[dvips]{graphicx}
+\usepackage{url}
+\usepackage{listings}
+
+\def \T {{\tt tamis}}
+
+\lstset{language=C,basicstyle=\tiny}
+\usepackage[normalem]{ulem}
+\title{\T, an advanced assertion definition framework}
+\author{Frederik Deweerdt}
+\date{Mai 2008}
+
+
+\begin{document}
+\maketitle
+
+\section{\T\ overview}
+\T\ is a C library aiming at providing the developer with a set of tools aimed
+at defining {\it invariants}. Invariants are very useful way of documenting
+the code's behaviour and assertions on those invariants are a good way to
+prove oneself that a program is correct.
+
+\section{\T\ requirements}
+The following software packages are required to be able to build \T
+The recommended versions are the ones we have witnessed working, please
+report if you had any success/problems with other versions.
+\begin{itemize}
+\item{
+	cmake
+	\begin{itemize}
+		\item{http://www.cmake.org/}
+		\item{recommended version: = 2.6.0}
+	\end{itemize}
+}
+
+\item{
+	binutils
+	\begin{itemize}
+		\item{www.gnu.org/software/binutils/}
+		\item{recommended version: 2.10}
+	\end{itemize}
+}
+
+\end{itemize}
+
+\end{document}

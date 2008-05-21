@@ -90,12 +90,6 @@ struct tamis_memzone {
 	LIST_ENTRY(tamis_memzone) list;
 };
 
-#if defined(__i386__) || defined(__x86_64__)
-#define BREAK_INSN 0xcc
-#else
-#error "Unknown arch, sorry"
-#endif
-
 #define __tamis __attribute__ ((aligned (PAGE_SIZE))) __attribute__((section ("tamis")))
 
 /**
