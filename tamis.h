@@ -20,7 +20,6 @@
 #ifndef __TAMIS_H__
 #define __TAMIS_H__
 
-#include <asm/page.h>
 #include <sys/queue.h>
 
 
@@ -30,7 +29,6 @@ void tamis_free(void *);
 #ifndef __KERNEL__
 
 #include <stdio.h>
-#include <linux/netfilter.h>
 
 #define printk printf
 #define KERN_ERR
@@ -90,7 +88,7 @@ struct tamis_memzone {
 	LIST_ENTRY(tamis_memzone) list;
 };
 
-#define __tamis __attribute__ ((aligned (PAGE_SIZE))) __attribute__((section ("tamis")))
+#define __tamis __attribute__ ((aligned (4096))) __attribute__((section ("tamis")))
 
 /**
  * @brief Remove a memory zone from being protected by tamis

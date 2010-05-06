@@ -36,6 +36,9 @@
 #include "tamis.h"
 #include "opcode.h"
 
+#include <unistd.h>
+#define PAGE_SIZE sysconf(_SC_PAGESIZE)
+
 #if 0
 #define pr_debug(x, a...) do { \
 			 	char __buf[4096]; \
