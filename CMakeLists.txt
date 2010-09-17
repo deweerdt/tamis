@@ -5,8 +5,15 @@ if(COMMAND cmake_policy)
 	cmake_policy(SET CMP0003 NEW)
 endif(COMMAND cmake_policy)
 
+FIND_PATH(HAVE_DISASM_H dis-asm.h /usr/include/ /usr/local/include/)
+
+IF(NOT HAVE_DISASM_H)
+	MESSAGE(FATAL_ERROR "Please install the binutils-dev (Debian) or binutils-devel (RH) package")
+ENDIF(NOT HAVE_DISASM_H)
+
+
 ADD_LIBRARY(${LIB_NAME} SHARED tamis.c opcode.c)
-ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall -L/opt/tsp/lib)
+ADD_DEFINITIONS(-D_GNU_SOURCE -D__USE_GNU -g -Wall)
 SET_TARGET_PROPERTIES(${LIB_NAME} PROPERTIES LINK_FLAGS "-nostartfiles")
 
 TARGET_LINK_LIBRARIES(${LIB_NAME} pthread opcodes bfd)
