@@ -187,12 +187,20 @@ int tamis_protect(void *p, size_t len, enum tamis_type t, void *arg)
 
 void *tamis_alloc(size_t size)
 {
-	return malloc((size / PAGE_SIZE) * PAGE_SIZE + PAGE_SIZE);
+	void *p;
+	int ret;
+	ret = posix_memalign(&p, PAGE_SIZE, (size / PAGE_SIZE) * PAGE_SIZE + PAGE_SIZE);
+	if (ret)
+		return NULL;
+
+	return p;
 }
+
 void tamis_free(void *p)
 {
 	free(p);
 }
+
 int tamis_init()
 {
 	struct sigaction action;
@@ -206,5 +214,3 @@ int tamis_init()
 
 	return 0;
 }
-
-
